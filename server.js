@@ -10,29 +10,37 @@ app.use((req, res, next) => {
     next();
 });
 
-// Helper: Get Channel ID from handle (@NASA)
+// Improved Helper: Finds the real UC... ID even from handles
 async function getChannelId(input) {
-    if (input.startsWith('UC')) return input;
+    const cleanInput = input.replace("@", "");
+    if (cleanInput.startsWith('UC')) return cleanInput;
+    
     try {
-        const response = await axios.get("https://www.youtube.com/" + (input.startsWith('@') ? '' : '@') + input);
+        // We search YouTube for the handle to find the underlying ID
+        const url = "https://www.youtube.com/@" + cleanInput;
+        const response = await axios.get(url, { 
+            headers: { 'User-Agent': 'Mozilla/5.0' } 
+        });
         const match = response.data.match(/"channelId":"(UC[^"]+)"/);
         return match ? match[1] : null;
-    } catch (e) { return null; }
+    } catch (e) { 
+        console.error("ID Fetch Error:", e.message);
+        return null; 
+    }
 }
 
-// --- 1. CONFIGURATOR UI ---
 app.get("/", (req, res) => {
     res.send(`
         <body style="background:#0f0f0f;color:white;font-family:sans-serif;text-align:center;padding:50px;">
             <h1 style="color:#ff0000;">📺 TubeTV Configurator</h1>
-            <p>Convert any YouTube Channel into a Stremio TV Feed.</p>
-            <input type="text" id="chan" placeholder="@NASA or @LofiGirl" style="width:60%;padding:12px;background:#222;color:white;border:1px solid #444;border-radius:5px;">
+            <p>Enter a YouTube Handle (e.g. @NASA) to create your addon.</p>
+            <input type="text" id="chan" placeholder="@NASA" style="width:60%;padding:12px;background:#222;color:white;border:1px solid #444;border-radius:5px;">
             <br><br>
             <button onclick="install()" style="padding:12px 25px;background:#cc0000;color:white;border:none;border-radius:5px;cursor:pointer;font-weight:bold;">Install Addon</button>
             <script>
                 function install() {
                     const val = document.getElementById('chan').value.trim();
-                    if(!val) return alert('Enter a channel handle!');
+                    if(!val) return alert('Enter a handle!');
                     const link = window.location.host + '/' + btoa(val) + '/manifest.json';
                     window.location.href = 'stremio://' + link;
                 }
@@ -41,28 +49,30 @@ app.get("/", (req, res) => {
     `);
 });
 
-// --- 2. MANIFEST ---
 app.get("/:config/manifest.json", (req, res) => {
     const handle = Buffer.from(req.params.config, 'base64').toString();
     res.json({
         id: "org.tubetv." + req.params.config.substring(0, 8),
         version: "1.0.0",
         name: "TubeTV: " + handle,
-        description: "Latest uploads from " + handle,
         resources: ["catalog", "stream"],
         types: ["tv"],
         catalogs: [{ type: "tv", id: "youtube_feed", name: "Latest Uploads" }]
     });
 });
 
-// --- 3. CATALOG ---
 app.get("/:config/catalog/:type/:id.json", async (req, res) => {
     try {
         const handle = Buffer.from(req.params.config, 'base64').toString();
         const channelId = await getChannelId(handle);
-        if (!channelId) return res.json({ metas: [] });
+        
+        if (!channelId) {
+            console.log("Could not find ID for:", handle);
+            return res.json({ metas: [] });
+        }
 
-        const rss = await axios.get("https://www.youtube.com/feeds/videos.xml?channel_id=" + channelId);
+        const rssUrl = "https://www.youtube.com/feeds/videos.xml?channel_id=" + channelId;
+        const rss = await axios.get(rssUrl);
         const feed = parser.parse(rss.data);
         const entries = Array.isArray(feed.feed.entry) ? feed.feed.entry : [feed.feed.entry];
 
@@ -75,17 +85,16 @@ app.get("/:config/catalog/:type/:id.json", async (req, res) => {
             posterShape: "landscape"
         }));
         res.json({ metas });
-    } catch (e) { res.json({ metas: [] }); }
+    } catch (e) { 
+        console.error("Catalog Error:", e.message);
+        res.json({ metas: [] }); 
+    }
 });
 
-// --- 4. STREAM ---
 app.get("/stream/:type/:id.json", (req, res) => {
     const ytId = req.params.id.replace("yt_", "");
     res.json({
-        streams: [{
-            title: "Watch on YouTube",
-            ytId: ytId
-        }]
+        streams: [{ title: "Watch on YouTube", ytId: ytId }]
     });
 });
 
