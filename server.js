@@ -10,13 +10,12 @@ app.use((req, res, next) => {
     next();
 });
 
-// Improved Helper: Finds the real UC... ID even from handles
+// Helper: Finds the real UC... ID even from handles
 async function getChannelId(input) {
-    const cleanInput = input.replace("@", "");
+    const cleanInput = input.replace("@", "").trim();
     if (cleanInput.startsWith('UC')) return cleanInput;
     
     try {
-        // We search YouTube for the handle to find the underlying ID
         const url = "https://www.youtube.com/@" + cleanInput;
         const response = await axios.get(url, { 
             headers: { 'User-Agent': 'Mozilla/5.0' } 
@@ -29,6 +28,7 @@ async function getChannelId(input) {
     }
 }
 
+// 1. CONFIGURATOR UI
 app.get("/", (req, res) => {
     res.send(`
         <body style="background:#0f0f0f;color:white;font-family:sans-serif;text-align:center;padding:50px;">
@@ -49,6 +49,7 @@ app.get("/", (req, res) => {
     `);
 });
 
+// 2. MANIFEST
 app.get("/:config/manifest.json", (req, res) => {
     const handle = Buffer.from(req.params.config, 'base64').toString();
     res.json({
@@ -61,15 +62,13 @@ app.get("/:config/manifest.json", (req, res) => {
     });
 });
 
+// 3. CATALOG
 app.get("/:config/catalog/:type/:id.json", async (req, res) => {
     try {
         const handle = Buffer.from(req.params.config, 'base64').toString();
         const channelId = await getChannelId(handle);
         
-        if (!channelId) {
-            console.log("Could not find ID for:", handle);
-            return res.json({ metas: [] });
-        }
+        if (!channelId) return res.json({ metas: [] });
 
         const rssUrl = "https://www.youtube.com/feeds/videos.xml?channel_id=" + channelId;
         const rss = await axios.get(rssUrl);
@@ -86,15 +85,18 @@ app.get("/:config/catalog/:type/:id.json", async (req, res) => {
         }));
         res.json({ metas });
     } catch (e) { 
-        console.error("Catalog Error:", e.message);
         res.json({ metas: [] }); 
     }
 });
 
-app.get("/stream/:type/:id.json", (req, res) => {
+// 4. STREAM (Corrected path to include /:config/)
+app.get("/:config/stream/:type/:id.json", (req, res) => {
     const ytId = req.params.id.replace("yt_", "");
     res.json({
-        streams: [{ title: "Watch on YouTube", ytId: ytId }]
+        streams: [{ 
+            title: "Watch on YouTube", 
+            ytId: ytId // Tells Stremio to use native YouTube player
+        }]
     });
 });
 
